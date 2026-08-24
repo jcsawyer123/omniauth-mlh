@@ -42,6 +42,13 @@ module OmniAuth
       # Enable PKCE (S256) by default; override with pkce: false for clients that cannot use it
       option :pkce, true
 
+      # When false, provider tokens are blanked in the auth hash before it
+      # reaches the host application. Deployments that never call the MLH API
+      # on the user's behalf (or proxy through another service) use this to
+      # avoid storing bearer material at all. Defaults to true so existing
+      # consumers keep receiving working credentials.
+      option :persist_credentials, true
+
       # Support expandable fields through options
       option :expand_fields, []
 
@@ -84,6 +91,20 @@ module OmniAuth
         return {} unless data.is_a?(Hash)
 
         symbolize_nested_arrays(data)
+      end
+
+      # omniauth-oauth2 builds this from the access token; when the host asked
+      # us not to persist credentials we hand back a shaped-but-empty copy so
+      # downstream persistence stores nothing sensitive.
+      def credentials
+        return super if options.persist_credentials
+
+        OmniAuth::AuthHash.new(
+          token: "",
+          refresh_token: nil,
+          secret: "",
+          expires: false
+        )
       end
 
       def build_api_url

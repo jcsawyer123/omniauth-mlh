@@ -82,6 +82,36 @@ RSpec.describe OmniAuth::Strategies::MLH do
       end
     end
 
+    context 'with persist_credentials disabled' do
+      let(:custom_strategy) do
+        described_class.new(app, 'client_id', 'client_secret',
+                            client_options: { api_site: 'https://api.mlh.test' },
+                            persist_credentials: false)
+      end
+
+      let(:response) do
+        instance_double(OAuth2::Response, body: { 'id' => 'core-user-1' }.to_json)
+      end
+
+      before do
+        allow(custom_strategy).to receive(:access_token).and_return(access_token)
+        allow(access_token).to receive(:token).and_return('real-token')
+        allow(access_token).to receive(:refresh_token).and_return('real-refresh')
+      end
+
+      it 'blanks every bearer field in the auth hash credentials' do
+        expect(access_token).to receive(:get)
+          .with('https://api.mlh.test/v4/users/me')
+          .and_return(response)
+
+        hash = custom_strategy.auth_hash
+
+        expect(hash['credentials']['token']).to eq('')
+        expect(hash['credentials']['refresh_token']).to be_nil
+        expect(hash['credentials']['secret']).to eq('')
+      end
+    end
+
     context 'with a custom api_site client option' do
       let(:custom_strategy) do
         described_class.new(app, 'client_id', 'client_secret',
