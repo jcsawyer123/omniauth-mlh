@@ -25,6 +25,7 @@ RSpec.describe OmniAuth::Strategies::MLH do
                       body: response_data.to_json,
                       parsed: response_data)
     end
+
     before do
       allow(access_token).to receive(:get)
         .with('https://api.mlh.com/v4/users/me')
@@ -93,14 +94,15 @@ RSpec.describe OmniAuth::Strategies::MLH do
 
       before do
         allow(custom_strategy).to receive(:access_token).and_return(access_token)
+        allow(access_token).to receive(:get)
+          .with('https://api.mlh.test/v4/users/me')
+          .and_return(response)
       end
 
       it 'fetches user data from the configured API base' do
-        expect(access_token).to receive(:get)
-          .with('https://api.mlh.test/v4/users/me')
-          .and_return(response)
+        custom_strategy.data
 
-        expect(custom_strategy.data[:id]).to eq('core-user-1')
+        expect(access_token).to have_received(:get).with('https://api.mlh.test/v4/users/me')
       end
     end
 
@@ -172,43 +174,43 @@ RSpec.describe OmniAuth::Strategies::MLH do
       end
     end
 
-    context 'with API error' do
-      context 'with OAuth2::Error' do
-        let(:error_response) do
-          instance_double(OAuth2::Response, status: 500, headers: {},
-                                          body: '{"error": "server_error"}')
-        end
-
-        before do
-          allow(access_token).to receive(:get).and_raise(OAuth2::Error.new(error_response))
-        end
-
-        it 'returns empty payload for OAuth2 errors' do
-          expect(strategy.data).to eq({})
-        end
+    context 'with OAuth2::Error' do
+      let(:error_response) do
+        instance_double(OAuth2::Response,
+                        status: 500,
+                        headers: {},
+                        body: '{"error": "server_error"}')
       end
 
-      context 'with malformed JSON' do
-        before do
-          allow(access_token).to receive(:get)
-            .and_return(instance_double(OAuth2::Response, body: '<html>not json</html>'))
-        end
-
-        it 'returns empty payload for JSON parse failures' do
-          expect(strategy.data).to eq({})
-        end
+      before do
+        allow(access_token).to receive(:get).and_raise(OAuth2::Error.new(error_response))
       end
 
-      context 'with unexpected error' do
-        let(:unexpected_error_class) { Class.new(StandardError) }
+      it 'returns empty payload for OAuth2 errors' do
+        expect(strategy.data).to eq({})
+      end
+    end
 
-        before do
-          allow(access_token).to receive(:get).and_raise(unexpected_error_class, 'boom')
-        end
+    context 'with malformed JSON' do
+      before do
+        allow(access_token).to receive(:get)
+          .and_return(instance_double(OAuth2::Response, body: '<html>not json</html>'))
+      end
 
-        it 'propagates unexpected errors' do
-          expect { strategy.data }.to raise_error(unexpected_error_class)
-        end
+      it 'returns empty payload for JSON parse failures' do
+        expect(strategy.data).to eq({})
+      end
+    end
+
+    context 'with unexpected error' do
+      let(:unexpected_error_class) { Class.new(StandardError) }
+
+      before do
+        allow(access_token).to receive(:get).and_raise(unexpected_error_class, 'boom')
+      end
+
+      it 'propagates unexpected errors' do
+        expect { strategy.data }.to raise_error(unexpected_error_class)
       end
     end
   end
@@ -218,17 +220,21 @@ RSpec.describe OmniAuth::Strategies::MLH do
       described_class.new(app, 'client_id', 'client_secret', persist_credentials: false)
     end
 
+    let(:empty_credentials) do
+      {
+        'token' => '',
+        'refresh_token' => nil,
+        'secret' => '',
+        'expires' => false
+      }
+    end
+
     before do
       allow(strategy).to receive(:data).and_return(id: 'core-user-1')
     end
 
     it 'omits bearer credentials when persistence is disabled' do
-      expect(strategy.auth_hash['credentials']).to eq(
-        'token' => '',
-        'refresh_token' => nil,
-        'secret' => '',
-        'expires' => false
-      )
+      expect(strategy.auth_hash['credentials']).to eq(empty_credentials)
     end
   end
 
@@ -282,13 +288,10 @@ RSpec.describe OmniAuth::Strategies::MLH do
 
     it 'uses S256 by default and sends the verifier only in token params' do
       params = strategy.authorize_params
-      verifier = strategy.options.pkce_verifier
 
-      expect(params[:code_challenge]).to be_present
-      expect(params[:code_challenge_method]).to eq('S256')
+      expect(params).to include(code_challenge: be_present, code_challenge_method: 'S256')
       expect(params).not_to have_key(:code_verifier)
-      expect(verifier).to be_present
-      expect(strategy.token_params[:code_verifier]).to eq(verifier)
+      expect(strategy.token_params[:code_verifier]).to eq(strategy.options.pkce_verifier).and be_present
     end
 
     it 'can be disabled via the pkce option' do
