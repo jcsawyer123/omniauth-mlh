@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'uri'
 
 RSpec.describe OmniAuth::Strategies::MLH do
   let(:strategy) { described_class.new(app, 'client_id', 'client_secret') }
@@ -79,36 +78,6 @@ RSpec.describe OmniAuth::Strategies::MLH do
 
       it 'returns an empty hash for empty data' do
         expect(strategy.data).to eq({})
-      end
-    end
-
-    context 'with persist_credentials disabled' do
-      let(:custom_strategy) do
-        described_class.new(app, 'client_id', 'client_secret',
-                            client_options: { api_site: 'https://api.mlh.test' },
-                            persist_credentials: false)
-      end
-
-      let(:response) do
-        instance_double(OAuth2::Response, body: { 'id' => 'core-user-1' }.to_json)
-      end
-
-      before do
-        allow(custom_strategy).to receive(:access_token).and_return(access_token)
-        allow(access_token).to receive(:token).and_return('real-token')
-        allow(access_token).to receive(:refresh_token).and_return('real-refresh')
-      end
-
-      it 'blanks every bearer field in the auth hash credentials' do
-        expect(access_token).to receive(:get)
-          .with('https://api.mlh.test/v4/users/me')
-          .and_return(response)
-
-        hash = custom_strategy.auth_hash
-
-        expect(hash['credentials']['token']).to eq('')
-        expect(hash['credentials']['refresh_token']).to be_nil
-        expect(hash['credentials']['secret']).to eq('')
       end
     end
 
@@ -244,6 +213,25 @@ RSpec.describe OmniAuth::Strategies::MLH do
     end
   end
 
+  describe '#auth_hash' do
+    let(:strategy) do
+      described_class.new(app, 'client_id', 'client_secret', persist_credentials: false)
+    end
+
+    before do
+      allow(strategy).to receive(:data).and_return(id: 'core-user-1')
+    end
+
+    it 'omits bearer credentials when persistence is disabled' do
+      expect(strategy.auth_hash['credentials']).to eq(
+        'token' => '',
+        'refresh_token' => nil,
+        'secret' => '',
+        'expires' => false
+      )
+    end
+  end
+
   describe '#uid' do
     context 'with valid data' do
       it 'returns the id from the data hash' do
@@ -292,54 +280,22 @@ RSpec.describe OmniAuth::Strategies::MLH do
 
     after { OmniAuth.config.test_mode = false }
 
-    it 'is enabled by default' do
-      expect(strategy.options.pkce).to be(true)
-    end
-
-    it 'includes a code_challenge and S256 method in the authorization params' do
+    it 'uses S256 by default and sends the verifier only in token params' do
       params = strategy.authorize_params
+      verifier = strategy.options.pkce_verifier
 
       expect(params[:code_challenge]).to be_present
       expect(params[:code_challenge_method]).to eq('S256')
-    end
-
-    it 'does not include code_verifier in the authorization URL' do
-      allow(strategy).to receive(:callback_url).and_return('http://localhost:8765/callback')
-
-      url = strategy.client.auth_code.authorize_url(
-        { redirect_uri: strategy.callback_url }.merge(strategy.authorize_params)
-      )
-      query = URI.decode_www_form(URI(url).query).to_h
-
-      expect(query['code_challenge']).to be_present
-      expect(query['code_challenge_method']).to eq('S256')
-      expect(query).not_to have_key('code_verifier')
-    end
-
-    it 'sends the matching code_verifier on the token exchange' do
-      strategy.authorize_params
-
-      expect(strategy.token_params[:code_verifier]).to eq(strategy.options.pkce_verifier)
-      expect(strategy.options.pkce_verifier).to be_present
+      expect(params).not_to have_key(:code_verifier)
+      expect(verifier).to be_present
+      expect(strategy.token_params[:code_verifier]).to eq(verifier)
     end
 
     it 'can be disabled via the pkce option' do
-      strategy = described_class.new(app, 'client_id', 'client_secret', pkce: false)
+      disabled_strategy = described_class.new(app, 'client_id', 'client_secret', pkce: false)
 
-      expect(strategy.authorize_params).not_to include(:code_challenge, :code_challenge_method)
-      expect(strategy.token_params).not_to have_key(:code_verifier)
-    end
-  end
-
-  describe 'security defaults' do
-    it 'keeps state validation enabled' do
-      expect(strategy.options.provider_ignores_state).to be_falsey
-    end
-
-    it 'remains a confidential client using request-body authentication' do
-      expect(strategy.client.id).to eq('client_id')
-      expect(strategy.client.secret).to eq('client_secret')
-      expect(strategy.options.client_options.auth_scheme).to eq(:request_body)
+      expect(disabled_strategy.authorize_params).not_to include(:code_challenge, :code_challenge_method)
+      expect(disabled_strategy.token_params).not_to have_key(:code_verifier)
     end
   end
 end

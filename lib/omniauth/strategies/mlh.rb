@@ -33,20 +33,12 @@ module OmniAuth
         site: 'https://www.mlh.com',
         authorize_url: '/oauth/authorize',
         token_url: 'https://api.mlh.com/v4/oauth/token',
-        # Base for the OAuth2 API (user info). Override when the API lives on a
-        # different origin than the default production MyMLH API.
         api_site: 'https://api.mlh.com',
         auth_scheme: :request_body # Change from basic auth to request body
       }
 
-      # Enable PKCE (S256) by default; override with pkce: false for clients that cannot use it
       option :pkce, true
 
-      # When false, provider tokens are blanked in the auth hash before it
-      # reaches the host application. Deployments that never call the MLH API
-      # on the user's behalf (or proxy through another service) use this to
-      # avoid storing bearer material at all. Defaults to true so existing
-      # consumers keep receiving working credentials.
       option :persist_credentials, true
 
       # Support expandable fields through options
@@ -93,16 +85,14 @@ module OmniAuth
         symbolize_nested_arrays(data)
       end
 
-      # omniauth-oauth2 builds this from the access token; when the host asked
-      # us not to persist credentials we hand back a shaped-but-empty copy so
-      # downstream persistence stores nothing sensitive.
+      # Preserve the OmniAuth credential shape without exposing bearer material.
       def credentials
         return super if options.persist_credentials
 
         OmniAuth::AuthHash.new(
-          token: "",
+          token: '',
           refresh_token: nil,
-          secret: "",
+          secret: '',
           expires: false
         )
       end
@@ -110,7 +100,7 @@ module OmniAuth
       def build_api_url
         base = (options.dig(:client_options, :api_site) || 'https://api.mlh.com').to_s.chomp('/')
         url = "#{base}/v4/users/me"
-        expand_fields = options[:expand_fields] || []
+        expand_fields = options[:expand_fields]
         return url if expand_fields.empty?
 
         expand_query = expand_fields.map { |f| "expand[]=#{f}" }.join('&')
